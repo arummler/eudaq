@@ -73,6 +73,7 @@ if(WIN32)
   add_definitions("/wd4251") # disables warning concerning dll-interface (comes up for std classes too often)
   add_definitions("/wd4996") # this compiler warnung is about that functions like fopen are unsafe.
   add_definitions("/wd4800") # disables warning concerning usage of old style bool (in root)
+  add_definitions("-DNOMINMAX")
 elseif(APPLE)
   if(NOT ((CMAKE_COMPILER_IS_GNUCC) OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang")))
     message(FATEL ERROR "On Unix/Linux like system, only GCC and Clang is support")
