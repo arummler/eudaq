@@ -11,31 +11,14 @@ endif()
 get_filename_component(EUDAQ_COMPONENT ${CMAKE_CURRENT_LIST_DIR} NAME)
 set(EUDAQ_TTREE_LIBRARY ${EUDAQ_COMPONENT} CACHE INTERNAL "eudaq ttree library")
 
-set (TTREE_LIBRARIES ${TTREE_LIBRARIES} CACHE INTERNAL "external ttree library")
-  set(EUDAQ_INCLUDE_DIRS
-    ${EUDAQ_INCLUDE_DIRS}
-    ${CMAKE_CURRENT_LIST_DIR}/include
-    CACHE INTERNAL "directory of eudaq include")
-include_directories(${EUDAQ_INCLUDE_DIRS})	
+add_library(${EUDAQ_COMPONENT} SHARED 
+	src/TTreeFileWriter.cc
+	src/RawEvent2TTreeConverter.cc
+	src/TTreeEventConverter.cc)
 
-include_directories(. include)
-include_directories(${CMAKE_BINARY_DIR})
-
-aux_source_directory(src EUDAQ_COMPONENT_SRC)
-
-add_library(${EUDAQ_COMPONENT} SHARED ${EUDAQ_COMPONENT_SRC})
-
-if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
-    set(TTREE_LIBRARIES
-      ${EUDAQ_INSTALL_PREFIX}/extern/lib/libttree.dylib
-      CACHE INTERNAL "external ttree library")
-  else()
-    set(TTREE_LIBRARIES
-      ${EUDAQ_INSTALL_PREFIX}/extern/lib/libttree.so
-      CACHE INTERNAL "external ttree library")
-  endif()
 
 target_link_libraries(${EUDAQ_COMPONENT} ${EUDAQ_CORE_LIBRARY} ROOT::Core ROOT::Tree)
+target_include_directories(${EUDAQ_COMPONENT} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>)
 
 install(TARGETS ${EUDAQ_COMPONENT}
   RUNTIME DESTINATION bin

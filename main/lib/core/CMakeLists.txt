@@ -11,20 +11,55 @@ if (${CXX_FILESYSTEM_HAVE_FS})
 else()
     set(CXX_FILESYSTEM_HAVE_FS 0)
 endif()
+
+
 configure_file(src/ModuleManager.cc.in ModuleManager.cc @ONLY)
 
-set(EUDAQ_INCLUDE_DIRS
-  ${CMAKE_CURRENT_LIST_DIR}/include
-  ${CMAKE_CURRENT_LIST_DIR}/include/eudaq
-  CACHE INTERNAL "directory of eudaq include")
-
-
-include_directories(include)
-include_directories(include/eudaq)
-
-aux_source_directory(src CORE_SRC)
-list(APPEND CORE_SRC ${CMAKE_CURRENT_BINARY_DIR}/ModuleManager.cc)
-add_library(${EUDAQ_CORE_LIBRARY} SHARED ${CORE_SRC})
+add_library(${EUDAQ_CORE_LIBRARY} SHARED
+	src/BufferSerializer.cc
+	src/CommandReceiver.cc
+	src/Configuration.cc
+	src/DataCollector.cc
+	src/DataReceiver.cc
+	src/DataSender.cc
+	src/Deserializer.cc
+	src/Event.cc
+	src/Exception.cc
+	src/FileDeserializer.cc
+	src/FileLogCollector.cc
+	src/FileNamer.cc
+	src/FileReader.cc
+	src/FileSerializer.cc
+	src/FileWriter.cc
+	src/LinkDef.h
+	src/LogCollector.cc
+	src/LogMessage.cc
+	src/LogSender.cc
+	src/Logger.cc
+	${CMAKE_CURRENT_BINARY_DIR}/ModuleManager.cc
+	src/Monitor.cc
+	src/NativeFileReader.cc
+	src/NativeFileWriter.cc
+	src/OptionParser.cc
+	src/Processor.cc
+	src/Producer.cc
+	src/RawEvent.cc
+	src/RawEvent2StdEventConverter.cc
+	src/RunControl.cc
+	src/Serializable.cc
+	src/Serializer.cc
+	src/StandardEvent.cc
+	src/StandardPlane.cc
+	src/Status.cc
+	src/StdEventConverter.cc
+	src/Time.cc
+	src/TransportBase.cc
+	src/TransportClient.cc
+	src/TransportNULL.cc
+	src/TransportServer.cc
+	src/TransportTCP.cc
+	src/Utils.cc
+)
 
 # generate the dictionary source code if ROOT is available
 FIND_PACKAGE(root QUIET)
@@ -63,11 +98,10 @@ set_target_properties(${EUDAQ_CORE_LIBRARY} PROPERTIES EXPORT_NAME ${EUDAQ_TARGE
 if(CMAKE_CXX_STANDARD>=17 AND CXX_FILESYSTEM_HAVE_FS)
   list(APPEND ADDITIONAL_LIBRARIES std::filesystem)
 endif()
-configure_file(src/ModuleManager.cc.in ModuleManager.cc @ONLY)
 
 list(APPEND ADDITIONAL_LIBRARIES ${CMAKE_DL_LIBS})
 target_link_libraries(${EUDAQ_CORE_LIBRARY} ${EUDAQ_THREADS_LIB} ${ADDITIONAL_LIBRARIES})
-target_include_directories(${EUDAQ_CORE_LIBRARY} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}> $<INSTALL_INTERFACE:include>)
+target_include_directories(${EUDAQ_CORE_LIBRARY} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>)
 
 install(TARGETS ${EUDAQ_CORE_LIBRARY}
   EXPORT eudaqTargets
