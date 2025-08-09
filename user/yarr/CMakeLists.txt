@@ -11,3 +11,4 @@ endif()
 message(STATUS "user/yarr is to be built (USER_YARR_BUILD=ON)")
 
 add_subdirectory(module)
+add_subdirectory(desynccorr)

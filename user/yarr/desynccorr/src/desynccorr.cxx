@@ -1,5 +1,5 @@
 #include "eudaq/FileReader.hh"
-#include "eudaq/PluginManager.hh"
+#include "eudaq/StdEventConverter.hh"
 #include "eudaq/OptionParser.hh"
 
 #include <iostream>
@@ -135,17 +135,16 @@ int main(int argc, char ** argv){
   auto TLU_timestamps = std::vector<std::vector<uint64_t>>{};
   TLU_timestamps.resize(nev/fine_evt_per_bin+1);
 
-  eudaq::FileReader reader = ("native", filename);
-  eudaq::FileReader noise_reader = ("native", filename);
+  eudaq::FileReaderSP reader = eudaq::FileReader::Make("native", filename);
+  eudaq::FileReaderSP noise_reader = eudaq::FileReader::Make("native", filename);
 
-  auto run_number = reader.RunNumber();
+  long int run_number = -1;
   std::cout << "Run number: " << run_number << '\n';
 
   //if the output root file name was not passed via the command line, set the default here
   if(ofile.empty()){
     ofile = "histo_run"+std::to_string(run_number)+".root";
   }
-  eudaq::PluginManager::Initialize(reader.GetDetectorEvent());
 
   TFile f(ofile.c_str(), "RECREATE");
  
@@ -157,16 +156,23 @@ int main(int argc, char ** argv){
   //first we have to do a noise run
   for(size_t ix = 0; ix < noiseevts; ix++) {  
     if(ix%500 == 0) std::cout << "Noise event " << ix << '\n';
-    bool hasEvt = noise_reader.NextEvent(0);
-    if(!hasEvt) {
+    auto evt = noise_reader->GetNextEvent();
+    if(!evt) {
       std::cout << "EOF reached!\n";	    
       break;
     }
-
-    auto & evt = noise_reader.GetDetectorEvent();
-    auto stdEvt = eudaq::PluginManager::ConvertToStandard(evt);
-    for(size_t plix = 0; plix < stdEvt.NumPlanes(); plix++) {
-      auto & plane = stdEvt.GetPlane(plix);
+    auto stdEvt = eudaq::StandardEvent::MakeShared();
+    if(!stdEvt){
+       stdEvt = eudaq::StandardEvent::MakeShared();
+       // TODO Can add config
+       eudaq::StdEventConverter::Convert(evt, stdEvt, NULL);
+    }    
+    
+    if(run_number == -1) {
+      run_number = evt->GetRunNumber();
+    }
+    for(size_t plix = 0; plix < stdEvt->NumPlanes(); plix++) {
+      auto & plane = stdEvt->GetPlane(plix);
       auto id = plane.ID();
       //for the first 100 events we expect "new" detectors to pop up, in this case we retrieve their information
       //and store it. This allows us to be stable against the cases where the first event(s) are corrupted and
@@ -237,15 +243,14 @@ int main(int argc, char ** argv){
 
   //Main event loop
   for(size_t ix = 0; ix < nev; ix++) {
-    bool hasEvt = reader.NextEvent(0);
-    if(!hasEvt) {
+    auto evt = reader->GetNextEvent();
+    if(!evt) {
       std::cout << "EOF reached!\n";	    
       break;
     }
-    auto & evt = reader.GetDetectorEvent();
 
     //All the event number consistency checking and log message printing
-    auto evt_nr = evt.GetEventNumber();
+    auto evt_nr = evt->GetEventNumber();
     if(previous_event_number >= 0 && previous_event_number != evt_nr-1) {
       std::cout << "Jump in event number detected! Jumped from " << previous_event_number << " to " << evt_nr << '\n' << "This will cause problems in the resynchronisation!\n";
     }
@@ -260,7 +265,7 @@ int main(int argc, char ** argv){
     auto fine_bin_remainder = evt_nr%fine_evt_per_bin;
 
     //Timestamp handling
-    auto timestamp = evt.GetTimestamp();
+    auto timestamp = evt->GetTimestampBegin();
     TLU_timestamps[fine_bin].emplace_back(timestamp);
     //Since we average over a few bins, e.g. [evt1, evt2, evt3], [evt4, evt5, evt6], [evt7, evt8, evt9]
     //We need to add the timestamp of e.g. evt3 to both subvectors since the [d]eltas we need in the blocks
@@ -269,9 +274,15 @@ int main(int argc, char ** argv){
       TLU_timestamps[fine_bin+1].emplace_back(timestamp);
     }
 
-    auto stdEvt = eudaq::PluginManager::ConvertToStandard(evt);
-    for(size_t plix = 0; plix < stdEvt.NumPlanes(); plix++) {
-      auto & plane = stdEvt.GetPlane(plix);
+    auto stdEvt = eudaq::StandardEvent::MakeShared();
+    if(!stdEvt){
+       stdEvt = eudaq::StandardEvent::MakeShared();
+       // TODO Can hand config file to converters using sth. like 
+       // auto eu_cfgPtr = eudaq::Configuration::MakeUniqueReadFile(conffile);
+       eudaq::StdEventConverter::Convert(evt, stdEvt, NULL);
+    }
+    for(size_t plix = 0; plix < stdEvt->NumPlanes(); plix++) {
+      const eudaq::StandardPlane & plane = stdEvt->GetPlane(plix);
       auto id = plane.ID();
       if(is_ref_or_dut(id)) {
         auto & plane_data = plane_ops[id];
