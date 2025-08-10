@@ -139,6 +139,7 @@ int main(int argc, char ** argv){
   eudaq::FileReaderSP noise_reader = eudaq::FileReader::Make("native", filename);
 
   long int run_number = -1;
+  //FIXME
   std::cout << "Run number: " << run_number << '\n';
 
   //if the output root file name was not passed via the command line, set the default here
@@ -162,15 +163,14 @@ int main(int argc, char ** argv){
       break;
     }
     auto stdEvt = eudaq::StandardEvent::MakeShared();
-    if(!stdEvt){
-       stdEvt = eudaq::StandardEvent::MakeShared();
-       // TODO Can add config
-       eudaq::StdEventConverter::Convert(evt, stdEvt, NULL);
-    }    
+    // TODO Can add config
+    eudaq::StdEventConverter::Convert(evt, stdEvt, NULL);
     
     if(run_number == -1) {
       run_number = evt->GetRunNumber();
+      std::cout << "Run number: " << run_number << '\n';
     }
+
     for(size_t plix = 0; plix < stdEvt->NumPlanes(); plix++) {
       auto & plane = stdEvt->GetPlane(plix);
       auto id = plane.ID();
@@ -275,12 +275,10 @@ int main(int argc, char ** argv){
     }
 
     auto stdEvt = eudaq::StandardEvent::MakeShared();
-    if(!stdEvt){
-       stdEvt = eudaq::StandardEvent::MakeShared();
-       // TODO Can hand config file to converters using sth. like 
-       // auto eu_cfgPtr = eudaq::Configuration::MakeUniqueReadFile(conffile);
-       eudaq::StdEventConverter::Convert(evt, stdEvt, NULL);
-    }
+    // TODO Can hand config file to converters using sth. like 
+    // auto eu_cfgPtr = eudaq::Configuration::MakeUniqueReadFile(conffile);
+    eudaq::StdEventConverter::Convert(evt, stdEvt, NULL);
+
     for(size_t plix = 0; plix < stdEvt->NumPlanes(); plix++) {
       const eudaq::StandardPlane & plane = stdEvt->GetPlane(plix);
       auto id = plane.ID();
