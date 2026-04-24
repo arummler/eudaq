@@ -71,6 +71,17 @@ typedef struct {
 	uint16_t tot;
 } Fei4Hit;
 
+// ── Binary block format constants (must match EudetArchiver.h) ───────────────
+// v1 (original): [uint32 tag][uint16 L1ID][uint16 eventNum][uint16 nHits]
+// v2 (TLU patch):[uint32 tag][uint16 tlu_id][uint8 tag_prev][uint8 tag_last]
+//                            [uint16 L1ID][uint16 eventNum][uint16 nHits]
+//                tlu_id == 0xFFFF means "FIFO miss / unknown"
+static constexpr unsigned YARR_HEADER_V1 = sizeof(uint32_t) + 3*sizeof(uint16_t);        // 10 bytes
+static constexpr unsigned YARR_HEADER_V2 = sizeof(uint32_t) + sizeof(uint16_t)            // tag + tlu_id
+                                         + sizeof(uint8_t)  + sizeof(uint8_t)              // tag_prev + tag_last
+                                         + 3*sizeof(uint16_t);                            // L1ID + eventNum + nHits = 14 bytes
+static constexpr uint16_t TLU_ID_UNKNOWN = 0xFFFFu;
+
 struct chipInfo {
 	std::string name;
 	std::string chipId;
@@ -95,6 +106,7 @@ private:
 	// Information extracted in decodeBORE()
 	static std::map<int, std::string> m_FrontEndType;
 	static std::map<int, Version> m_EventVersion;
+	static std::map<int, int> m_BlockVersion;           // binary block format version (1 or 2)
 	static std::map<int, std::vector<chipInfo> > m_chip_info_by_uid;
 	static std::map<int, std::map<unsigned int, std::string> > m_module_size_by_module_index;
 	static std::map<int, std::map<unsigned int, unsigned int> > m_plane_id_by_module_index;
@@ -120,6 +132,11 @@ void YarrRawEvent2StdEventConverter::decodeBORE(
 			<< std::endl;
 
 	m_EventVersion[prodID] = event_version; // only now we have the producer ID available
+
+	// Binary block format version — default 1 for data without the tag (old files).
+	m_BlockVersion[prodID] = std::stoi(bore->GetTag("BLOCK_VERSION", "1"));
+	std::cout << "YarrRawEvent2StdEventConverter: block version "
+	          << m_BlockVersion[prodID] << " for producer " << prodID << std::endl;
 
 	std::string DUTTYPE = bore->GetTag("DUTTYPE");
 
@@ -272,22 +289,50 @@ bool YarrRawEvent2StdEventConverter::Converting(eudaq::EventSPC d1,
 
 		unsigned it = 0;
 		unsigned fragmentCnt = 0;
+		int block_ver = m_BlockVersion.count(prodID) ? m_BlockVersion.at(prodID) : 1;
 		while (it < block.size()) { // Should find as many fragments as trigger per event
-			uint32_t tag = *((uint32_t*) ((&block[it]))) & 0xFFFF;
-			it += sizeof(uint32_t); // binary AND to get rid of garbage due to upcasting
-			uint32_t l1id = *((uint16_t*) (&block[it]));
-			it += sizeof(uint16_t);
-			uint32_t bcid = *((uint16_t*) (&block[it]));
-			it += sizeof(uint16_t);
-			uint32_t nHits = *((uint16_t*) (&block[it]));
-			it += sizeof(uint16_t);
-			if (tag == (uint32_t) 0xFFFF || l1id == (uint16_t) 0xFFFF) {
-				std::cout  << "ERROR EVENT ENCOUNTERED AND EVENT "
-						<< ev_id << " WILL NOT PROCESSED FURTHER AND MARKED AS FILLEREVENT:ERRORHEADER and IsValidEvent:No"
-						<< std::endl;
+
+			unsigned fragment_start = it;   // save for v2 raw-tag check below
+
+			// ── chip-side tag (both versions) ────────────────────────────
+			uint32_t tag = *((uint32_t*) (&block[it])) & 0xFFFF;
+			it += sizeof(uint32_t);
+
+			// ── TLU fields (v2 only) ─────────────────────────────────────
+			uint16_t tlu_id   = TLU_ID_UNKNOWN;
+			uint8_t  tag_prev = 0, tag_last = 0;
+			if (block_ver >= 2) {
+				tlu_id   = *((uint16_t*) (&block[it])); it += sizeof(uint16_t);
+				tag_prev = *((uint8_t*)  (&block[it])); it += sizeof(uint8_t);
+				tag_last = *((uint8_t*)  (&block[it])); it += sizeof(uint8_t);
+			}
+
+			uint32_t l1id  = *((uint16_t*) (&block[it])); it += sizeof(uint16_t);
+			uint32_t bcid  = *((uint16_t*) (&block[it])); it += sizeof(uint16_t);
+			uint32_t nHits = *((uint16_t*) (&block[it])); it += sizeof(uint16_t);
+			// ── Filler / error header detection ──────────────────────────
+			// v1: tag==0xFFFF or l1id==0xFFFF signals a missed-event filler.
+			// v2: the raw 32-bit tag word is 0xFFFFFFFF (forwardMissedEventError
+			//     writes this as the sentinel); tlu_id carries the known TLU-ID
+			//     (or 0xFFFF if unknown).
+			uint32_t raw_tag = *((uint32_t*) (&block[fragment_start]));
+			bool is_filler_header = (tag == (uint32_t)0xFFFF || l1id == (uint16_t)0xFFFF)
+			                     || (block_ver >= 2 && raw_tag == 0xFFFFFFFFu);
+			if (is_filler_header) {
+				std::cout << "ERROR/FILLER HEADER in event " << ev_id
+				          << " tlu_id=" << (tlu_id == TLU_ID_UNKNOWN ? std::string("UNKNOWN") : std::to_string(tlu_id))
+				          << " — event marked FILLEREVENT:ERRORHEADER" << std::endl;
 				d2->SetTag("FILLEREVENT", "ERRORHEADER");
+				if (block_ver >= 2 && tlu_id != TLU_ID_UNKNOWN)
+					d2->SetTag("FILLER_TLU_ID", tlu_id);
+				// Skip the (zero) hits for this fragment and continue.
+				it += nHits * sizeof(Fei4Hit);
+				fragmentCnt++;
 				continue;
 			}
+			// Expose TLU-ID as a StandardEvent tag on the first good fragment.
+			if (block_ver >= 2 && fragmentCnt == 0 && tlu_id != TLU_ID_UNKNOWN)
+				d2->SetTag("TLU_ID", tlu_id);
 			if (tag < 0 || tag > 255) {
 				std::cout << "STRANGE TAG ENCOUNTERED: " << tag << " AND EVENT "
 						<< ev_id << " WILL NOT BE PROCESSED FURTHER AND MARKED AS FILLEREVENT:INVALIDTAG and IsValidEvent:No."
@@ -419,6 +464,7 @@ bool YarrRawEvent2StdEventConverter::Converting(eudaq::EventSPC d1,
 
 std::map<int, std::string> YarrRawEvent2StdEventConverter::m_FrontEndType = { };
 std::map<int, Version> YarrRawEvent2StdEventConverter::m_EventVersion = { };
+std::map<int, int> YarrRawEvent2StdEventConverter::m_BlockVersion = { };
 std::map<int, std::vector<chipInfo> > YarrRawEvent2StdEventConverter::m_chip_info_by_uid =
 		{ };
 std::map<int, std::map<unsigned int, std::string> > YarrRawEvent2StdEventConverter::m_module_size_by_module_index =
